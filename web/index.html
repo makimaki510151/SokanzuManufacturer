@@ -55,7 +55,7 @@
         <li>盤面上でマウスホイールを回すと拡大・縮小できます（表示リセットで全体表示に戻ります）。</li>
         <li>選択ツールのとき、要素のない余白を左ドラッグすると盤面をパン（表示位置を移動）できます。</li>
         <li>テキストはダブルクリックまたは右クリックで内容・色・サイズを変更できます。</li>
-        <li>画像は右クリックでプロフィールを編集できます。</li>
+        <li>画像は右クリックでプロフィールを編集できます。リンクURL（または詳細に URL のみ）を入れると、SVG 書き出しで画像クリックでそのページを開けます。</li>
         <li>グループ枠は選択ツールでドラッグして移動。青い角・辺のつかみで拡大縮小できます（離すと範囲内の要素で members を更新）。グループは右クリック/ダブルクリックで装飾を編集できます。</li>
         <li>接続ツールで始点・終点の順にクリックし、ダイアログで「沿線の文字」を設定できます。文字は線に沿って表示され、上下が逆にならない向きに自動調整されます。既存の線は右クリックまたはダブルクリックで編集できます（クリック判定は少し広めです）。</li>
         <li>JSON の画像は <code>data:</code> URL または相対パスに対応します。</li>
@@ -91,7 +91,8 @@
       <h3>プロフィール（画像）</h3>
       <label>タイトル <input type="text" id="fld-profile-title" class="fld-wide" /></label>
       <label>説明 <input type="text" id="fld-profile-desc" class="fld-wide" /></label>
-      <label>詳細 <textarea id="fld-profile-details" rows="5" class="fld-wide"></textarea></label>
+      <label>詳細 <textarea id="fld-profile-details" rows="5" class="fld-wide" placeholder="本文。"></textarea></label>
+      <label>リンクURL（任意） <input type="text" id="fld-profile-link-url" class="fld-wide" placeholder="https://example.com/（SVG で画像クリック時に開く）" /></label>
       <menu class="modal-actions">
         <button type="submit" value="ok" class="btn btn-primary">OK</button>
         <button type="button" id="dlg-profile-cancel" class="btn">キャンセル</button>

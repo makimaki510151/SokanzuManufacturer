@@ -10,7 +10,7 @@ const CONNECTION_SHIFT = 8;
 const EXPORT_PAD = 40;
 
 /** @typedef {{ width: number, height: number }} CanvasInfo */
-/** @typedef {{ title?: string, description?: string, details?: string }} Profile */
+/** @typedef {{ title?: string, description?: string, details?: string, link_url?: string }} Profile */
 /** @typedef {{ type:'image', id:string, path:string, x:number, y:number, width:number, height:number, profile?:Profile }} ElementImage */
 /** @typedef {{ type:'text', id:string, content:string, x:number, y:number, font?:string, size?:number, color?:string }} ElementText */
 /** @typedef {{ id:string, members:string[], bounds:number[], label:string, color:string, line_type?:string, stroke_width?:number, fill_color?:string }} Group */
@@ -804,6 +804,36 @@ function escapeXml(s) {
     .replace(/"/g, "&quot;");
 }
 
+/**
+ * SVG の <a href> 用。http / https のみ許可。
+ * @param {string} raw
+ */
+function sanitizeHttpUrlForSvg(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  try {
+    const u = new URL(s);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+    return u.href;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * プロフィールから SVG 用リンク URL を得る（link_url 優先。無ければ詳細が URL のみのとき）。
+ * @param {*} [prof]
+ */
+function profileLinkUrlForExport(prof) {
+  if (!prof) return "";
+  const explicit = sanitizeHttpUrlForSvg(prof.link_url || "");
+  if (explicit) return explicit;
+  const d = String(prof.details || "").trim();
+  if (!d || d.includes("\n") || d.includes("\r")) return "";
+  if (/^https?:\/\/\S+$/i.test(d)) return sanitizeHttpUrlForSvg(d);
+  return "";
+}
+
 function wrapTooltipLines(text, maxLen, maxLines) {
   const lines = [];
   const raw = text.replace(/\r\n/g, "\n").split("\n");
@@ -926,6 +956,7 @@ function buildSvgString(d, opts = {}) {
   style.textContent = `
     .sk-bg { fill: #ffffff; }
     .sk-person { cursor: default; }
+    .sk-person .sk-person-link { cursor: pointer; }
     .sk-person .sk-hit { fill: transparent; stroke: none; }
     .sk-person .sk-tip { opacity: 0; pointer-events: none; transition: opacity 0.12s ease; }
     .sk-person:hover .sk-tip { opacity: 1; }
@@ -1073,7 +1104,18 @@ function buildSvgString(d, opts = {}) {
       tipG.prepend(tr);
       tip.append(tipG);
 
-      g.append(img, titleLabel, hit, tip);
+      const linkHref = profileLinkUrlForExport(prof);
+      if (linkHref) {
+        const a = doc.createElementNS(NS, "a");
+        a.setAttribute("class", "sk-person-link");
+        a.setAttribute("href", linkHref);
+        a.setAttribute("target", "_blank");
+        a.setAttribute("rel", "noopener noreferrer");
+        a.append(img, titleLabel, hit);
+        g.append(a, tip);
+      } else {
+        g.append(img, titleLabel, hit, tip);
+      }
       le.append(g);
     }
   }
@@ -1391,6 +1433,7 @@ function saveEditingProfile() {
     title: document.getElementById("fld-profile-title").value,
     description: document.getElementById("fld-profile-desc").value,
     details: document.getElementById("fld-profile-details").value,
+    link_url: document.getElementById("fld-profile-link-url").value.trim(),
   };
   editingProfile = null;
   redraw();
@@ -1857,6 +1900,7 @@ svg.addEventListener("contextmenu", (ev) => {
     document.getElementById("fld-profile-title").value = p.title || "";
     document.getElementById("fld-profile-desc").value = p.description || "";
     document.getElementById("fld-profile-details").value = p.details || "";
+    document.getElementById("fld-profile-link-url").value = p.link_url || "";
     openDialog(document.getElementById("dlg-profile"));
     return;
   }
