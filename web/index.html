@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>相関図エディタ（Web）</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>相関図エディタ</h1>
+    <p class="subtitle">soukanzu と互換の JSON 形式。SVG ではアイコンにマウスオーバーでプロフィールを表示できます。</p>
+  </header>
+
+  <nav class="toolbar" aria-label="メインツールバー">
+    <div class="toolbar-group">
+      <label class="sr-only" for="file-import">JSON を読み込む</label>
+      <input type="file" id="file-import" accept="application/json,.json" hidden />
+      <button type="button" id="btn-import" class="btn">JSON を開く</button>
+      <button type="button" id="btn-new" class="btn">新規</button>
+    </div>
+    <div class="toolbar-group tools" id="edit-tools">
+      <span class="toolbar-label">ツール</span>
+      <button type="button" class="btn tool active" data-tool="select" title="選択・移動">選択</button>
+      <button type="button" class="btn tool" data-tool="connect" title="2 要素を順にクリックで接続">接続</button>
+      <button type="button" class="btn tool" data-tool="group" title="ドラッグでグループ範囲">グループ</button>
+      <button type="button" class="btn tool" data-tool="delete" title="クリックで削除">削除</button>
+    </div>
+    <div class="toolbar-group">
+      <button type="button" id="btn-add-image" class="btn btn-primary">画像を追加</button>
+      <input type="file" id="image-file" accept="image/*" multiple hidden />
+      <button type="button" id="btn-add-text" class="btn btn-primary">テキストを追加</button>
+    </div>
+    <div class="toolbar-group">
+      <button type="button" id="btn-reset-view" class="btn" title="ズーム・パンをリセット">表示リセット</button>
+    </div>
+  </nav>
+
+  <section class="export-bar" aria-label="書き出し">
+    <span class="toolbar-label">データ出力</span>
+    <label class="radio-label"><input type="radio" name="export-format" value="json" checked /> 作り手用 JSON</label>
+    <label class="radio-label"><input type="radio" name="export-format" value="svg" /> 見る側用 SVG（ホバーでプロフィール）</label>
+    <label class="radio-label"><input type="radio" name="export-format" value="png" /> PNG（SVG と同じ切り出し）</label>
+    <button type="button" id="btn-export" class="btn btn-accent">ダウンロード</button>
+  </section>
+
+  <main class="workspace">
+    <div class="canvas-wrap" id="canvas-wrap">
+      <svg id="diagram" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="相関図キャンバス"></svg>
+      <div id="group-rubber" class="rubber-band hidden" aria-hidden="true"></div>
+    </div>
+    <aside class="side-panel" id="side-panel">
+      <h2>ヒント</h2>
+      <ul>
+        <li>盤面上でマウスホイールを回すと拡大・縮小できます（表示リセットで全体表示に戻ります）。</li>
+        <li>選択ツールのとき、要素のない余白を左ドラッグすると盤面をパン（表示位置を移動）できます。</li>
+        <li>テキストはダブルクリックまたは右クリックで内容・色・サイズを変更できます。</li>
+        <li>画像は右クリックでプロフィールを編集できます。</li>
+        <li>グループ枠は選択ツールでドラッグして移動。青い角・辺のつかみで拡大縮小できます（離すと範囲内の要素で members を更新）。グループは右クリック/ダブルクリックで装飾を編集できます。</li>
+        <li>接続ツールで始点・終点の順にクリックし、ダイアログで「沿線の文字」を設定できます。文字は線に沿って表示され、上下が逆にならない向きに自動調整されます。既存の線は右クリックまたはダブルクリックで編集できます（クリック判定は少し広めです）。</li>
+        <li>JSON の画像は <code>data:</code> URL または相対パスに対応します。</li>
+        <li>SVG はブラウザで開くだけで、画像上にマウスを乗せるとプロフィールが表示されます。</li>
+        <li>PNG は SVG と同じ範囲（図の内容＋周囲の余白）のビットマップとして書き出します（透過なし・ホバーなし）。</li>
+      </ul>
+      <div id="status" class="status" role="status"></div>
+    </aside>
+  </main>
+
+  <!-- モーダル: テキスト編集 -->
+  <dialog id="dlg-text" class="modal">
+    <form method="dialog" id="form-text">
+      <h3>テキスト編集</h3>
+      <label>内容 <textarea id="fld-text-content" class="fld-wide" rows="3" required></textarea></label>
+      <label>色
+        <span class="color-row">
+          <input type="color" id="fld-text-color-picker" value="#111111" />
+          <input type="text" id="fld-text-color" placeholder="#000000" />
+        </span>
+      </label>
+      <label>サイズ <input type="number" id="fld-text-size" min="8" max="72" /></label>
+      <menu class="modal-actions">
+        <button type="submit" value="ok" class="btn btn-primary">OK</button>
+        <button type="button" id="dlg-text-cancel" class="btn">キャンセル</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <!-- モーダル: プロフィール -->
+  <dialog id="dlg-profile" class="modal">
+    <form method="dialog" id="form-profile">
+      <h3>プロフィール（画像）</h3>
+      <label>タイトル <input type="text" id="fld-profile-title" class="fld-wide" /></label>
+      <label>説明 <input type="text" id="fld-profile-desc" class="fld-wide" /></label>
+      <label>詳細 <textarea id="fld-profile-details" rows="5" class="fld-wide"></textarea></label>
+      <menu class="modal-actions">
+        <button type="submit" value="ok" class="btn btn-primary">OK</button>
+        <button type="button" id="dlg-profile-cancel" class="btn">キャンセル</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <!-- モーダル: 接続 -->
+  <dialog id="dlg-connection" class="modal">
+    <form method="dialog" id="form-connection">
+      <h3>接続線の設定</h3>
+      <label>種類
+        <select id="fld-conn-type">
+          <option value="line">線</option>
+          <option value="arrow">矢印</option>
+          <option value="dash_line">破線</option>
+          <option value="double_arrow">両矢印</option>
+        </select>
+      </label>
+      <label>色
+        <span class="color-row">
+          <input type="color" id="fld-conn-color-picker" value="#111111" />
+          <input type="text" id="fld-conn-color" />
+        </span>
+      </label>
+      <label>太さ (px) <input type="number" id="fld-conn-width" min="1" max="20" /></label>
+      <label>沿線の文字 <input type="text" id="fld-conn-label" class="fld-wide" placeholder="空欄なら非表示" /></label>
+      <label>文字サイズ <input type="number" id="fld-conn-label-size" min="6" max="48" value="12" /></label>
+      <label>線からの距離 <input type="number" id="fld-conn-label-offset" min="-80" max="80" step="1" value="0" />（矢印の進行方向に対し左が正）</label>
+      <menu class="modal-actions">
+        <button type="submit" value="ok" class="btn btn-primary">OK</button>
+        <button type="button" id="dlg-conn-cancel" class="btn">キャンセル</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <!-- モーダル: グループ -->
+  <dialog id="dlg-group" class="modal">
+    <form method="dialog" id="form-group">
+      <h3>グループ設定</h3>
+      <label>グループ名 <input type="text" id="fld-group-label" class="fld-wide" required /></label>
+      <label>枠の色
+        <span class="color-row">
+          <input type="color" id="fld-group-color-picker" value="#3b82f6" />
+          <input type="text" id="fld-group-color" placeholder="#3b82f6" />
+        </span>
+      </label>
+      <label>枠の種類
+        <select id="fld-group-line-type">
+          <option value="dash">破線</option>
+          <option value="solid">実線</option>
+        </select>
+      </label>
+      <label>枠の太さ (px) <input type="number" id="fld-group-stroke-width" min="1" max="20" value="1" /></label>
+      <label>背景色
+        <span class="color-row">
+          <input type="color" id="fld-group-fill-color-picker" value="#eff6ff" />
+          <input type="text" id="fld-group-fill-color" class="fld-wide" placeholder="空欄で透明（例: #eff6ff）" />
+        </span>
+      </label>
+      <label class="check-row"><input type="checkbox" id="fld-group-fill-none" /> 背景色を透明にする</label>
+      <menu class="modal-actions">
+        <button type="submit" value="ok" class="btn btn-primary">OK</button>
+        <button type="button" id="dlg-group-cancel" class="btn">キャンセル</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>
