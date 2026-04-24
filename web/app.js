@@ -853,6 +853,12 @@ function wrapTooltipLines(text, maxLen, maxLines) {
   return lines.slice(0, maxLines);
 }
 
+function truncateForPanel(text, maxChars) {
+  const s = String(text || "");
+  if (s.length <= maxChars) return s;
+  return `${s.slice(0, Math.max(1, maxChars - 1))}…`;
+}
+
 /**
  * 図面上の実体のバウンディング（余白なし）。空なら null。
  * @param {DiagramData} d
@@ -944,6 +950,18 @@ function buildSvgString(d, opts = {}) {
     vbW = cw;
     vbH = ch;
   }
+  const PANEL_W = 272;
+  const PANEL_H = 228;
+  const PANEL_MARGIN = 16;
+  const PANEL_SHADOW = 6;
+  const MIN_EXPORT_W = PANEL_W + PANEL_MARGIN * 2 + PANEL_SHADOW;
+  const MIN_EXPORT_H = PANEL_H + PANEL_MARGIN * 2 + PANEL_SHADOW;
+  vbW = Math.max(vbW, MIN_EXPORT_W);
+  vbH = Math.max(vbH, MIN_EXPORT_H);
+
+  const panelX = vbX + vbW - PANEL_MARGIN - PANEL_W;
+  const panelY = vbY + PANEL_MARGIN;
+  const panelTextX = panelX + 16;
   const NS = "http://www.w3.org/2000/svg";
   const doc = document.implementation.createDocument(NS, "svg", null);
   const root = doc.documentElement;
@@ -956,13 +974,18 @@ function buildSvgString(d, opts = {}) {
   style.textContent = `
     .sk-bg { fill: #ffffff; }
     .sk-person { cursor: default; }
-    .sk-person .sk-person-link { cursor: pointer; }
+    .sk-person-open { cursor: pointer; }
     .sk-person .sk-hit { fill: transparent; stroke: none; }
-    .sk-person .sk-tip { opacity: 0; pointer-events: none; transition: opacity 0.12s ease; }
-    .sk-person:hover .sk-tip { opacity: 1; }
-    .sk-tip-rect { fill: rgba(15,20,25,0.92); stroke: #2d3a4d; stroke-width: 1; }
-    .sk-tip-title { fill: #f0f4f8; font-weight: 600; font-size: 13px; font-family: Segoe UI, Meiryo, sans-serif; }
-    .sk-tip-body { fill: #c5d0de; font-size: 11px; font-family: Segoe UI, Meiryo, sans-serif; }
+    .sk-person .sk-hit { cursor: pointer; }
+    .sk-panel { display: none; }
+    .sk-panel:target { display: inline; }
+    .sk-panel-shadow { fill: rgba(15, 23, 42, 0.18); }
+    .sk-panel-bg { fill: rgba(15, 20, 25, 0.96); stroke: #2d3a4d; stroke-width: 1; }
+    .sk-panel-title { fill: #f0f4f8; font-weight: 700; font-size: 13px; font-family: Segoe UI, Meiryo, sans-serif; }
+    .sk-panel-label { fill: #93a8c5; font-size: 10px; font-family: Segoe UI, Meiryo, sans-serif; }
+    .sk-panel-body { fill: #d2ddec; font-size: 11px; font-family: Segoe UI, Meiryo, sans-serif; }
+    .sk-panel-close { fill: #fca5a5; font-size: 13px; font-family: Segoe UI, Meiryo, sans-serif; cursor: pointer; }
+    .sk-panel-link { fill: #93c5fd; font-size: 10px; font-family: Segoe UI, Meiryo, sans-serif; text-decoration: underline; }
   `;
   const defs = doc.createElementNS(NS, "defs");
   const markerEnd = doc.createElementNS(NS, "marker");
@@ -1027,6 +1050,8 @@ function buildSvgString(d, opts = {}) {
 
   const le = doc.createElementNS(NS, "g");
   le.setAttribute("class", "layer-elements");
+  const lp = doc.createElementNS(NS, "g");
+  lp.setAttribute("class", "layer-panels");
   for (const el of d.elements) {
     if (el.type === "text") {
       const te = doc.createElementNS(NS, "text");
@@ -1044,8 +1069,8 @@ function buildSvgString(d, opts = {}) {
       const title = prof.title || "（無題）";
       const desc = prof.description || "";
       const details = prof.details || "";
-      const bodyText = [desc, details].filter(Boolean).join("\n\n");
-      const lines = [title, ...wrapTooltipLines(bodyText, 34, 8)];
+      const panelId = `sk-panel-${el.id}`;
+      const linkHref = profileLinkUrlForExport(prof);
 
       const g = doc.createElementNS(NS, "g");
       g.setAttribute("class", "sk-person");
@@ -1073,54 +1098,111 @@ function buildSvgString(d, opts = {}) {
       hit.setAttribute("y", String(-el.height / 2));
       hit.setAttribute("width", String(el.width));
       hit.setAttribute("height", String(el.height));
-
-      const tip = doc.createElementNS(NS, "g");
-      tip.setAttribute("class", "sk-tip");
-      const tipX = -el.width / 2;
-      const tipY = -el.height / 2 - 8;
-      const lineHeight = 14;
-      const pad = 8;
-      const tw = 240;
-      const th = pad * 2 + lines.length * lineHeight;
-      const tipG = doc.createElementNS(NS, "g");
-      tipG.setAttribute("transform", `translate(${tipX}, ${tipY - th})`);
-
-      const tr = doc.createElementNS(NS, "rect");
-      tr.setAttribute("class", "sk-tip-rect");
-      tr.setAttribute("x", "0");
-      tr.setAttribute("y", "0");
-      tr.setAttribute("rx", "6");
-      tr.setAttribute("width", String(tw));
-      tr.setAttribute("height", String(th));
-
-      lines.forEach((line, i) => {
-        const tp = doc.createElementNS(NS, "text");
-        tp.setAttribute("x", String(pad));
-        tp.setAttribute("y", String(pad + lineHeight * (i + 0.75)));
-        tp.setAttribute("class", i === 0 ? "sk-tip-title" : "sk-tip-body");
-        tp.textContent = line;
-        tipG.append(tp);
-      });
-      tipG.prepend(tr);
-      tip.append(tipG);
-
-      const linkHref = profileLinkUrlForExport(prof);
-      if (linkHref) {
-        const a = doc.createElementNS(NS, "a");
-        a.setAttribute("class", "sk-person-link");
-        a.setAttribute("href", linkHref);
-        a.setAttribute("target", "_blank");
-        a.setAttribute("rel", "noopener noreferrer");
-        a.append(img, titleLabel, hit);
-        g.append(a, tip);
-      } else {
-        g.append(img, titleLabel, hit, tip);
-      }
+      const open = doc.createElementNS(NS, "a");
+      open.setAttribute("class", "sk-person-open");
+      open.setAttribute("href", `#${panelId}`);
+      open.append(img, titleLabel, hit);
+      g.append(open);
       le.append(g);
+
+      const panel = doc.createElementNS(NS, "g");
+      panel.setAttribute("id", panelId);
+      panel.setAttribute("class", "sk-panel");
+
+      const panelShadow = doc.createElementNS(NS, "rect");
+      panelShadow.setAttribute("class", "sk-panel-shadow");
+      panelShadow.setAttribute("x", String(panelX + PANEL_SHADOW));
+      panelShadow.setAttribute("y", String(panelY + PANEL_SHADOW));
+      panelShadow.setAttribute("width", String(PANEL_W));
+      panelShadow.setAttribute("height", String(PANEL_H));
+      panelShadow.setAttribute("rx", "10");
+
+      const panelBg = doc.createElementNS(NS, "rect");
+      panelBg.setAttribute("class", "sk-panel-bg");
+      panelBg.setAttribute("x", String(panelX));
+      panelBg.setAttribute("y", String(panelY));
+      panelBg.setAttribute("width", String(PANEL_W));
+      panelBg.setAttribute("height", String(PANEL_H));
+      panelBg.setAttribute("rx", "10");
+
+      const panelIcon = doc.createElementNS(NS, "image");
+      panelIcon.setAttribute("x", String(panelTextX));
+      panelIcon.setAttribute("y", String(panelY + 14));
+      panelIcon.setAttribute("width", "44");
+      panelIcon.setAttribute("height", "44");
+      panelIcon.setAttribute("href", el.path);
+      panelIcon.setAttribute("preserveAspectRatio", "xMidYMid slice");
+
+      const panelTitle = doc.createElementNS(NS, "text");
+      panelTitle.setAttribute("class", "sk-panel-title");
+      panelTitle.setAttribute("x", String(panelX + 70));
+      panelTitle.setAttribute("y", String(panelY + 36));
+      panelTitle.setAttribute("dominant-baseline", "middle");
+      panelTitle.textContent = truncateForPanel(title, 20);
+
+      const closeLink = doc.createElementNS(NS, "a");
+      closeLink.setAttribute("href", "#");
+      const closeBtn = doc.createElementNS(NS, "text");
+      closeBtn.setAttribute("class", "sk-panel-close");
+      closeBtn.setAttribute("x", String(panelX + PANEL_W - 18));
+      closeBtn.setAttribute("y", String(panelY + 18));
+      closeBtn.textContent = "×";
+      closeLink.append(closeBtn);
+
+      const labelDesc = doc.createElementNS(NS, "text");
+      labelDesc.setAttribute("class", "sk-panel-label");
+      labelDesc.setAttribute("x", String(panelTextX));
+      labelDesc.setAttribute("y", String(panelY + 76));
+      labelDesc.textContent = "説明";
+      const descBody = doc.createElementNS(NS, "text");
+      descBody.setAttribute("class", "sk-panel-body");
+      descBody.setAttribute("x", String(panelTextX));
+      descBody.setAttribute("y", String(panelY + 92));
+      const descLines = wrapTooltipLines(desc || "-", 28, 3);
+      descLines.forEach((line, i) => {
+        const t = doc.createElementNS(NS, "tspan");
+        t.setAttribute("x", String(panelTextX));
+        t.setAttribute("dy", i === 0 ? "0" : "1.25em");
+        t.textContent = line;
+        descBody.append(t);
+      });
+
+      const labelDetails = doc.createElementNS(NS, "text");
+      labelDetails.setAttribute("class", "sk-panel-label");
+      labelDetails.setAttribute("x", String(panelTextX));
+      labelDetails.setAttribute("y", String(panelY + 138));
+      labelDetails.textContent = "詳細";
+      const detailsBody = doc.createElementNS(NS, "text");
+      detailsBody.setAttribute("class", "sk-panel-body");
+      detailsBody.setAttribute("x", String(panelTextX));
+      detailsBody.setAttribute("y", String(panelY + 154));
+      const detailsLines = wrapTooltipLines(details || "-", 28, 3);
+      detailsLines.forEach((line, i) => {
+        const t = doc.createElementNS(NS, "tspan");
+        t.setAttribute("x", String(panelTextX));
+        t.setAttribute("dy", i === 0 ? "0" : "1.25em");
+        t.textContent = line;
+        detailsBody.append(t);
+      });
+
+      panel.append(panelShadow, panelBg, panelIcon, panelTitle, closeLink, labelDesc, descBody, labelDetails, detailsBody);
+      if (linkHref) {
+        const ext = doc.createElementNS(NS, "a");
+        ext.setAttribute("href", linkHref);
+        ext.setAttribute("target", "_blank");
+        ext.setAttribute("rel", "noopener noreferrer");
+        const extText = doc.createElementNS(NS, "text");
+        extText.setAttribute("class", "sk-panel-link");
+        extText.setAttribute("x", String(panelTextX));
+        extText.setAttribute("y", String(panelY + PANEL_H - 10));
+        extText.textContent = "リンクを開く";
+        ext.append(extText);
+        panel.append(ext);
+      }
+      lp.append(panel);
     }
   }
-
-  root.append(style, defs, bg, lg, lc, le);
+  root.append(style, defs, bg, lg, lc, le, lp);
   const serializer = new XMLSerializer();
   const xml = serializer.serializeToString(root);
   const svg = `<?xml version="1.0" encoding="UTF-8"?>\n${xml}\n`;
