@@ -853,6 +853,82 @@ function wrapTooltipLines(text, maxLen, maxLines) {
   return lines.slice(0, maxLines);
 }
 
+function estimateTooltipCharWidth(ch) {
+  if (!ch) return 0;
+  // 日本語・全角はやや広く、ASCII はやや狭く見積もる
+  return /[ -~]/.test(ch) ? 0.56 : 1;
+}
+
+function trimLineToVisualWidth(text, maxVisualWidth, withEllipsis = false) {
+  const src = String(text || "");
+  const ell = withEllipsis ? "…" : "";
+  const limit = Math.max(0, maxVisualWidth - (withEllipsis ? 1 : 0));
+  let acc = 0;
+  let out = "";
+  for (const ch of src) {
+    const w = estimateTooltipCharWidth(ch);
+    if (acc + w > limit) break;
+    out += ch;
+    acc += w;
+  }
+  return `${out}${ell}`;
+}
+
+function wrapTooltipLinesByWidth(text, maxVisualWidth, maxLines = Infinity) {
+  const src = String(text || "-").replace(/\r\n/g, "\n");
+  const paras = src.split("\n");
+  /** @type {string[]} */
+  const lines = [];
+  for (let p = 0; p < paras.length && lines.length < maxLines; p += 1) {
+    const para = paras[p];
+    if (!para.length) {
+      lines.push("");
+      continue;
+    }
+    let i = 0;
+    while (i < para.length && lines.length < maxLines) {
+      let acc = 0;
+      let j = i;
+      while (j < para.length) {
+        const w = estimateTooltipCharWidth(para[j]);
+        if (acc + w > maxVisualWidth) break;
+        acc += w;
+        j += 1;
+      }
+      if (j <= i) j = i + 1;
+      const chunk = para.slice(i, j);
+      lines.push(chunk);
+      i = j;
+    }
+  }
+  if (!lines.length) lines.push("-");
+  return lines.slice(0, maxLines);
+}
+
+function maxLinesForHeight(heightPx, fontSizePx, lineHeightFactor = 1.25) {
+  const linePx = Math.max(1, fontSizePx * lineHeightFactor);
+  return Math.max(1, Math.floor(heightPx / linePx));
+}
+
+function panelHeightFromLineCounts(titleLines, descLines, detailsLines, hasLink) {
+  const titleRows = Math.max(1, titleLines);
+  const descRows = Math.max(1, descLines);
+  const detailRows = Math.max(1, detailsLines);
+  const linkSpace = hasLink ? 22 : 0;
+  const h =
+    14 + // top pad
+    44 + // icon
+    18 + // gap below icon block
+    14 + // "説明" label
+    descRows * 14 +
+    14 + // gap + "詳細" label
+    detailRows * 14 +
+    linkSpace +
+    16; // bottom pad
+  // 最低限の見た目を担保
+  return Math.max(228, h);
+}
+
 function truncateForPanel(text, maxChars) {
   const s = String(text || "");
   if (s.length <= maxChars) return s;
@@ -951,11 +1027,25 @@ function buildSvgString(d, opts = {}) {
     vbH = ch;
   }
   const PANEL_W = 272;
-  const PANEL_H = 228;
+  const PANEL_H_BASE = 228;
   const PANEL_MARGIN = 16;
   const PANEL_SHADOW = 6;
+  const PANEL_TITLE_WIDTH = 18;
+  const PANEL_BODY_WIDTH = 22;
+  const TITLE_FS = 13;
+  const BODY_FS = 11;
+  let panelMaxH = PANEL_H_BASE;
+  for (const el of d.elements) {
+    if (el.type !== "image") continue;
+    const prof = el.profile || {};
+    const tLines = wrapTooltipLinesByWidth(prof.title || "（無題）", PANEL_TITLE_WIDTH).length;
+    const dLines = wrapTooltipLinesByWidth(prof.description || "-", PANEL_BODY_WIDTH).length;
+    const detLines = wrapTooltipLinesByWidth(prof.details || "-", PANEL_BODY_WIDTH).length;
+    const hasLink = Boolean(profileLinkUrlForExport(prof));
+    panelMaxH = Math.max(panelMaxH, panelHeightFromLineCounts(tLines, dLines, detLines, hasLink));
+  }
   const MIN_EXPORT_W = PANEL_W + PANEL_MARGIN * 2 + PANEL_SHADOW;
-  const MIN_EXPORT_H = PANEL_H + PANEL_MARGIN * 2 + PANEL_SHADOW;
+  const MIN_EXPORT_H = panelMaxH + PANEL_MARGIN * 2 + PANEL_SHADOW;
   vbW = Math.max(vbW, MIN_EXPORT_W);
   vbH = Math.max(vbH, MIN_EXPORT_H);
 
@@ -1071,6 +1161,20 @@ function buildSvgString(d, opts = {}) {
       const details = prof.details || "";
       const panelId = `sk-panel-${el.id}`;
       const linkHref = profileLinkUrlForExport(prof);
+      const titleLines = wrapTooltipLinesByWidth(title || "（無題）", PANEL_TITLE_WIDTH);
+      const descLines = wrapTooltipLinesByWidth(desc || "-", PANEL_BODY_WIDTH);
+      const detailsLines = wrapTooltipLinesByWidth(details || "-", PANEL_BODY_WIDTH);
+      const panelH = panelHeightFromLineCounts(
+        titleLines.length,
+        descLines.length,
+        detailsLines.length,
+        Boolean(linkHref)
+      );
+      const labelDescY = panelY + 76;
+      const descBodyY = panelY + 92;
+      const labelDetailsY = descBodyY + Math.max(1, descLines.length) * 14 + 16;
+      const detailsBodyY = labelDetailsY + 16;
+      const linkY = panelY + panelH - 10;
 
       const g = doc.createElementNS(NS, "g");
       g.setAttribute("class", "sk-person");
@@ -1114,7 +1218,7 @@ function buildSvgString(d, opts = {}) {
       panelShadow.setAttribute("x", String(panelX + PANEL_SHADOW));
       panelShadow.setAttribute("y", String(panelY + PANEL_SHADOW));
       panelShadow.setAttribute("width", String(PANEL_W));
-      panelShadow.setAttribute("height", String(PANEL_H));
+      panelShadow.setAttribute("height", String(panelH));
       panelShadow.setAttribute("rx", "10");
 
       const panelBg = doc.createElementNS(NS, "rect");
@@ -1122,7 +1226,7 @@ function buildSvgString(d, opts = {}) {
       panelBg.setAttribute("x", String(panelX));
       panelBg.setAttribute("y", String(panelY));
       panelBg.setAttribute("width", String(PANEL_W));
-      panelBg.setAttribute("height", String(PANEL_H));
+      panelBg.setAttribute("height", String(panelH));
       panelBg.setAttribute("rx", "10");
 
       const panelIcon = doc.createElementNS(NS, "image");
@@ -1136,9 +1240,14 @@ function buildSvgString(d, opts = {}) {
       const panelTitle = doc.createElementNS(NS, "text");
       panelTitle.setAttribute("class", "sk-panel-title");
       panelTitle.setAttribute("x", String(panelX + 70));
-      panelTitle.setAttribute("y", String(panelY + 36));
-      panelTitle.setAttribute("dominant-baseline", "middle");
-      panelTitle.textContent = truncateForPanel(title, 20);
+      panelTitle.setAttribute("y", String(panelY + 30));
+      titleLines.forEach((line, i) => {
+        const t = doc.createElementNS(NS, "tspan");
+        t.setAttribute("x", String(panelX + 70));
+        t.setAttribute("dy", i === 0 ? "0" : "1.2em");
+        t.textContent = line;
+        panelTitle.append(t);
+      });
 
       const closeLink = doc.createElementNS(NS, "a");
       closeLink.setAttribute("href", "#");
@@ -1152,13 +1261,12 @@ function buildSvgString(d, opts = {}) {
       const labelDesc = doc.createElementNS(NS, "text");
       labelDesc.setAttribute("class", "sk-panel-label");
       labelDesc.setAttribute("x", String(panelTextX));
-      labelDesc.setAttribute("y", String(panelY + 76));
+      labelDesc.setAttribute("y", String(labelDescY));
       labelDesc.textContent = "説明";
       const descBody = doc.createElementNS(NS, "text");
       descBody.setAttribute("class", "sk-panel-body");
       descBody.setAttribute("x", String(panelTextX));
-      descBody.setAttribute("y", String(panelY + 92));
-      const descLines = wrapTooltipLines(desc || "-", 28, 3);
+      descBody.setAttribute("y", String(descBodyY));
       descLines.forEach((line, i) => {
         const t = doc.createElementNS(NS, "tspan");
         t.setAttribute("x", String(panelTextX));
@@ -1170,13 +1278,12 @@ function buildSvgString(d, opts = {}) {
       const labelDetails = doc.createElementNS(NS, "text");
       labelDetails.setAttribute("class", "sk-panel-label");
       labelDetails.setAttribute("x", String(panelTextX));
-      labelDetails.setAttribute("y", String(panelY + 138));
+      labelDetails.setAttribute("y", String(labelDetailsY));
       labelDetails.textContent = "詳細";
       const detailsBody = doc.createElementNS(NS, "text");
       detailsBody.setAttribute("class", "sk-panel-body");
       detailsBody.setAttribute("x", String(panelTextX));
-      detailsBody.setAttribute("y", String(panelY + 154));
-      const detailsLines = wrapTooltipLines(details || "-", 28, 3);
+      detailsBody.setAttribute("y", String(detailsBodyY));
       detailsLines.forEach((line, i) => {
         const t = doc.createElementNS(NS, "tspan");
         t.setAttribute("x", String(panelTextX));
@@ -1194,7 +1301,7 @@ function buildSvgString(d, opts = {}) {
         const extText = doc.createElementNS(NS, "text");
         extText.setAttribute("class", "sk-panel-link");
         extText.setAttribute("x", String(panelTextX));
-        extText.setAttribute("y", String(panelY + PANEL_H - 10));
+        extText.setAttribute("y", String(linkY));
         extText.textContent = "リンクを開く";
         ext.append(extText);
         panel.append(ext);
